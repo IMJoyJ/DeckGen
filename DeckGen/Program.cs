@@ -55,7 +55,7 @@ namespace DeckGen
             }
             Console.WriteLine($"Completed 100%, adding spare cards to side deck...");
             CardPool.AddRange(CardPoolEx);
-            for (int i=0; ; i++)
+            for (int i=0; i < deckNum; i++)
             {
                 string deck = $"decks{Path.DirectorySeparatorChar}output{i}.ydk";
                 if (!AddSideToDeck(deck))
@@ -121,6 +121,8 @@ namespace DeckGen
             {
                 sw.WriteLine($"{card} 2");
             }
+            sw.Close();
+            fs.Close();
         }
 
         private static void InitCardPool(string cdbFile, int mainNum, int exNum)

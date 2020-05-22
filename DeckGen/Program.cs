@@ -14,31 +14,36 @@ namespace DeckGen
         public const long   TYPE_LINK           = 0x4000000 ;
         static void Main(string[] args)
         {
-            if (args.Length < 6)
+            if (args.Length < 7)
             {
                 Console.WriteLine("Usage:");
-                Console.WriteLine("deckgen [cdb file] [lflist file] [num of main] [num of ex] [num of side] [how many deck should be generated]");
-                Console.WriteLine("e.g. deckgen cards.cdb lflist.conf 40 15 15 100");
+                Console.WriteLine("deckgen [cdb file] [lflist file] [num of main] [num of ex] [num of main per deck] [num of ex per deck] [max deck num that should be generated]");
+                Console.WriteLine("e.g. deckgen cards.cdb lflist.conf 400 150 40 15");
                 return;
             }
             string cdbFile = args[0];
             string lfListFile = args[1];
-            string numOfMain = args[2];
-            string numOfEx = args[3];
-            string numOfSide = args[4];
-            int deckNum = int.Parse(args[5]);
+            string poolMainCardNum = args[2];
+            string poolExCardNum = args[3];
+            string numOfMain = args[4];
+            string numOfEx = args[5];
+            int deckNum = int.Parse(args[6]);
+            foreach(string str in args)
+            {
+                Console.WriteLine(str);
+            }
             Console.WriteLine("Reading lflist...");
             ReadLfList(lfListFile);
             Console.WriteLine("Initialize card pool...");
             //There are only about 10K*3 cards for now(<300KB when use string). A initialize should be a better way.
-            InitCardPool(cdbFile);
+            InitCardPool(cdbFile, int.Parse(poolMainCardNum), int.Parse(poolExCardNum));
 
             Console.WriteLine("Generating decks...");
             int percent = 0;
             Directory.CreateDirectory("decks");
             for(int i = 0; i < deckNum; i++)
             {
-                if (!GenerateDeck(int.Parse(numOfMain), int.Parse(numOfEx), int.Parse(numOfSide),$"decks{Path.DirectorySeparatorChar}output{i}.ydk"))
+                if (!GenerateDeck(int.Parse(numOfMain), int.Parse(numOfEx), $"decks{Path.DirectorySeparatorChar}output{i}.ydk"))
                 {
                     break;
                 }
@@ -48,10 +53,45 @@ namespace DeckGen
                     Console.WriteLine($"Completed {percent}%");
                 }
             }
-            Console.WriteLine($"Completed 100%, generating new lflist...");
+            Console.WriteLine($"Completed 100%, adding spare cards to side deck...");
+            CardPool.AddRange(CardPoolEx);
+            for (int i=0; ; i++)
+            {
+                string deck = $"decks{Path.DirectorySeparatorChar}output{i}.ydk";
+                if (!AddSideToDeck(deck))
+                {
+                    break;
+                }
+                if (!File.Exists(deck))
+                {
+                    break;
+                }
+            }
+            Console.WriteLine($"Completed, generating new lflist...");
             GenerateCardPoolLFList();
             Console.WriteLine($"Completed!Press any key to exit.");
             Console.ReadKey();
+        }
+
+        private static bool AddSideToDeck(string deck)
+        {
+            FileStream fs = new FileStream(deck,FileMode.Append);
+            StreamWriter sw = new StreamWriter(fs);
+            for(int i = 0; i < 15; i++)
+            {
+                if (CardPool.Count == 0)
+                {
+                    sw.Close();
+                    fs.Close();
+                    return false;
+                }
+                int index = _rd.Next(CardPool.Count);
+                sw.WriteLine(CardPool[index]);
+                CardPool.RemoveAt(index);
+            }
+            sw.Close();
+            fs.Close();
+            return true;
         }
 
         private static void GenerateCardPoolLFList()
@@ -83,8 +123,10 @@ namespace DeckGen
             }
         }
 
-        private static void InitCardPool(string cdbFile)
+        private static void InitCardPool(string cdbFile, int mainNum, int exNum)
         {
+            List<string> CardPoolLocal = new List<string>();
+            List<string> CardPoolExLocal = new List<string>();
             SQLiteConnection sqlcon = new SQLiteConnection($"Data Source={cdbFile}");
             sqlcon.Open();
             SQLiteCommand cmd = new SQLiteCommand("SELECT id,type FROM datas", sqlcon);
@@ -104,34 +146,56 @@ namespace DeckGen
                 {
                     for (int i = 0; i < num; i++)
                     {
-                        CardPoolEx.Add(id);
+                        CardPoolExLocal.Add(id);
                     }
                 }
                 else
                 {
                     for (int i = 0; i < num; i++)
                     {
-                        CardPool.Add(id);
+                        CardPoolLocal.Add(id);
                     }
                 }
+            }
+            for (int i = 0; i < mainNum; i++)
+            {
+                int index = _rd.Next(0, CardPoolLocal.Count);
+                CardPool.Add(CardPoolLocal[index]);
+                CardPoolLocal.RemoveAt(index);
+                if (!CardPoolLFList.ContainsKey(CardPoolLocal[index]))
+                {
+                    CardPoolLFList.Add(CardPoolLocal[index], 1);
+                }
+                else
+                {
+                    CardPoolLFList[CardPoolLocal[index]]++;
+                }
+            }
+            for (int i = 0; i < exNum; i++)
+            {
+                int index = _rd.Next(0, CardPoolExLocal.Count);
+                CardPoolEx.Add(CardPoolExLocal[index]);
+                CardPoolLFList[CardPoolExLocal[index]]++;
+                CardPoolExLocal.RemoveAt(index);
             }
             reader.Close();
             cmd.Dispose();
             sqlcon.Dispose();
+            CardPoolLocal.Clear();
+            CardPoolExLocal.Clear();
         }
 
         static readonly Random _rd = new Random();
-        private static bool GenerateDeck(int numOfMain, int numOfEx, int numOfSide, string file)
+        private static bool GenerateDeck(int numOfMain, int numOfEx, string file)
         {
+            if (CardPool.Count < numOfMain || CardPoolEx.Count < numOfEx)
+            {
+                return false;
+            }
             Dictionary<string,int> main = new Dictionary<string, int>();
             Dictionary<string,int> ex = new Dictionary<string, int>();
-            Dictionary<string,int> side = new Dictionary<string, int>();
             for (int i = 0; i < numOfMain; i++)
             {
-                if(CardPool.Count == 0)
-                {
-                    break;
-                }
                 int index = _rd.Next(CardPool.Count);
                 if (main.ContainsKey(CardPool[index]))
                 {
@@ -160,74 +224,6 @@ namespace DeckGen
                 }
                 CardPoolEx.RemoveAt(index);
             }
-            for (int i = 0; i < numOfSide; i++)
-            {
-                if (CardPoolEx.Count == 0 && CardPool.Count == 0)
-                {
-                    break;
-                }
-                int index = _rd.Next(CardPoolEx.Count + CardPool.Count);
-                if (index >= CardPoolEx.Count)
-                {
-                    index -= CardPoolEx.Count;
-                    if (side.ContainsKey(CardPool[index]))
-                    {
-                        side[CardPoolEx[index]]++;
-                    }
-                    else
-                    {
-                        side.Add(CardPool[index], 1);
-                    }
-                    CardPool.RemoveAt(index);
-                }
-                else
-                {
-                    if (side.ContainsKey(CardPoolEx[index]))
-                    {
-                        side[CardPoolEx[index]]++;
-                    }
-                    else
-                    {
-                        side.Add(CardPoolEx[index], 1);
-                    }
-                    CardPoolEx.RemoveAt(index);
-                }
-            }
-            if (main.Count == 0 && ex.Count == 0 && side.Count == 0)
-            {
-                return false;
-            }
-            Dictionary<string, int> allDeck = new Dictionary<string, int>();
-            foreach (var kvp in main)
-            {
-                allDeck.Add(kvp.Key, kvp.Value);
-            }
-            foreach (var kvp in ex)
-            {
-                if (allDeck.ContainsKey(kvp.Key))
-                {
-                    allDeck[kvp.Key] += kvp.Value;
-                }
-                else
-                {
-                    allDeck.Add(kvp.Key, kvp.Value);
-                }
-            }
-            foreach (var kvp in side)
-            {
-                if (allDeck.ContainsKey(kvp.Key))
-                {
-                    allDeck[kvp.Key] += kvp.Value;
-                }
-                else
-                {
-                    allDeck.Add(kvp.Key, kvp.Value);
-                }
-            }
-            foreach (var kvp in allDeck)
-            {
-                CardPoolLFList[kvp.Key] = Math.Max(CardPoolLFList[kvp.Key], kvp.Value);
-            }
             FileStream fs = new FileStream(file,FileMode.Create);
             StreamWriter sw = new StreamWriter(fs);
             sw.WriteLine("#created by DeckGen");
@@ -248,21 +244,12 @@ namespace DeckGen
                 }
             }
             sw.WriteLine("!side");
-            foreach (var kvp in side)
-            {
-                for (int i = 0; i < kvp.Value; i++)
-                {
-                    sw.WriteLine(kvp.Key);
-                }
-            }
             sw.Close();
             fs.Close();
             main.Clear();
             ex.Clear();
-            side.Clear();
             return true;
         }
-
 
         public static Dictionary<string,int> LFList = new Dictionary<string, int>();
         public static List<string> CardPool = new List<string>();

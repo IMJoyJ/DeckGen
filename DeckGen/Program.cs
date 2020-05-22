@@ -28,10 +28,6 @@ namespace DeckGen
             string numOfMain = args[4];
             string numOfEx = args[5];
             int deckNum = int.Parse(args[6]);
-            foreach(string str in args)
-            {
-                Console.WriteLine(str);
-            }
             Console.WriteLine("Reading lflist...");
             ReadLfList(lfListFile);
             Console.WriteLine("Initialize card pool...");
